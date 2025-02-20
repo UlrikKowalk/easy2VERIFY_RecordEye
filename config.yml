@@ -1,0 +1,10 @@
+
+parameters_general:
+  cameras: [['right', 1, 50]]
+  camera_start_id: 0
+  video_width: 320
+  video_height: 320
+
+
+
+
