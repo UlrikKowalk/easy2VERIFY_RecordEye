@@ -9,6 +9,7 @@ import datetime
 import pandas as pd
 import numpy as np
 import json
+import uuid
 
 from Core.VideoSourceMulti import VideoSourceMulti
 from Core.HeadTracker import HeadTracker
@@ -132,10 +133,22 @@ class App(QtWidgets.QMainWindow):
         self.subject_data = dict()
         self.subject_data["name"] = ''
 
+        self.width_video_full = 320
+        self.height_video_full = 240
+        self.face_x = 0
+        self.face_y = 0
+        self.iris_l = [0, 0]
+        self.iris_r = [0, 0]
+        self.rec_factor = 0.95  # used to smoothen data
+
         self.cam_order = {}
         for cam in parameters_general['cameras']:
             #              name,      id,     orientation
             self.cam_order[cam[0]] = (cam[1], cam[2])
+
+        self.cam_in_use = 0
+        self.is_first = True
+        self.is_blink = False
 
         # build main app layout
         layout_main = QtWidgets.QVBoxLayout()
@@ -148,47 +161,51 @@ class App(QtWidgets.QMainWindow):
         window_content.setLayout(layout_main)
         self.setCentralWidget(window_content)
 
-        self.text_label_subject_name = QtWidgets.QLineEdit('')
-        self.text_label_subject_name.setDisabled(True)
-        self.button_save_result = QtWidgets.QPushButton('Save Result')
-        self.button_save_result.setDisabled(True)
-        # self.button_save_result.clicked.connect(self.on_click_save_result)
-        self.button_new_subject = QtWidgets.QPushButton('New Subject')
-        # self.button_new_subject.clicked.connect(self.on_click_new_subject)
-        self.text_label_subject_name = QtWidgets.QLineEdit('')
-        self.text_label_subject_name.setDisabled(True)
-        self.button_record_movement = QtWidgets.QPushButton('Record Movement')
-        self.button_record_movement.setDisabled(True)
-        # self.button_record_movement.clicked.connect(self.on_click_record_movement)
+        self.button_save = QtWidgets.QPushButton('Save')
+        self.button_save.setDisabled(True)
+        self.button_save.clicked.connect(self.on_click_save)
+        self.button_stop = QtWidgets.QPushButton('Stop')
+        self.button_stop.setDisabled(True)
+        self.button_stop.clicked.connect(self.on_click_stop)
+        self.button_clear = QtWidgets.QPushButton('Clear')
+        self.button_clear.setDisabled(True)
+        self.button_clear.clicked.connect(self.on_click_clear)
+        self.button_record = QtWidgets.QPushButton('Record')
+        self.button_record.setDisabled(False)
+        self.button_record.clicked.connect(self.on_click_record)
 
-        layout_menu.addWidget(self.button_new_subject)
-        layout_menu.addWidget(self.text_label_subject_name)
-        # layout_menu.addWidget(self.button_clear)
-        layout_menu.addWidget(self.button_record_movement)
-        layout_menu.addWidget(self.button_save_result)
+        layout_menu.addWidget(self.button_record)
+        layout_menu.addWidget(self.button_stop)
+        layout_menu.addWidget(self.button_clear)
+        layout_menu.addWidget(self.button_save)
 
         self.video_monitor_labels = []
         # create video monitors
-        for _ in self.cam_order:
-            tmp = QtWidgets.QLabel(self)
-            tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
-            self.video_monitor_labels.append(tmp)
-            layout_video.addWidget(tmp)
+        # for _ in self.cam_order:
+        #     tmp = QtWidgets.QLabel(self)
+        #     tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
+        #     self.video_monitor_labels.append(tmp)
+        #     layout_video.addWidget(tmp)
+
+        # left eye
+        tmp = QtWidgets.QLabel(self)
+        tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
+        self.video_monitor_labels.append(tmp)
+        layout_video.addWidget(tmp)
+        # right eye
+        tmp = QtWidgets.QLabel(self)
+        tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
+        self.video_monitor_labels.append(tmp)
+        layout_video.addWidget(tmp)
+
+
 
         # create a separate video thread for each camera
         self.video_threads = []
         for cam in self.cam_order:
             self.video_threads.append(VideoInputThread(self.cam_order[cam][0]))
         for video_thread in self.video_threads:
-            # video_thread.new_frame_obtained.connect(self.new_frame_available)
-            video_thread.start()
-
-        # create a separate video thread for each camera
-        self.video_threads = []
-        for cam in self.cam_order:
-            self.video_threads.append(VideoInputThread(self.cam_order[cam][0]))
-        for video_thread in self.video_threads:
-            # video_thread.new_frame_obtained.connect(self.new_frame_available)
+            video_thread.new_frame_obtained.connect(self.new_frame_available)
             video_thread.start()
 
         try:
@@ -211,6 +228,183 @@ class App(QtWidgets.QMainWindow):
             self.headtracker_thread.stop()
 
 
+    @QtCore.Slot(np.ndarray, int)
+    def new_frame_available(self, cv_img, cam_id):
+        # if frame originates from currently used camera, perform face calculations
+        if self.cam_in_use == cam_id:
+            if self.is_first:
+                self.start_time = time.time()
+            duration = time.time() - self.start_time
+            self.start_time = time.time()
+
+            if self.is_first:
+                self.face_mapping.first(cv_img)
+                # self.head_azimuth_cam_absolute = self.head_azimuth_cam
+                # self.eye_azimuth_cam_absolute = self.eye_azimuth_cam
+            try:
+                self.face_mapping.calculate_face_orientation(cv_img)
+                # self.head_azimuth_cam, self.head_elevation_cam = self.face_mapping.get_azimuth_and_elevation()
+                # self.eye_azimuth_cam, self.eye_elevation_cam, self.is_blink = self.face_mapping.get_gaze()
+
+                # self.calibrate_estimates()
+                # self.correct_azimuth()
+                # self.determine_cam_in_use()
+                self.update_face_coordinates()
+
+
+                self.is_error = False
+            except:
+                self.is_error = True
+
+
+            # self.data_time.append(self.data_time[-1] + duration)
+
+
+
+            # try:
+            #     # self.update_data()
+            #     # self.update_graphs_head()
+            #     # self.update_graphs_eye()
+            # except:
+            #     self.is_error = True
+
+        # draw camera frame onto correct video monitor
+        self.update_video_display(cv_img, cam_id)
+
+        if self.cam_in_use == cam_id and self.is_first:
+            self.is_first = False
+            if self.use_head_tracker:
+                self.headtracker_thread.reset_values()
+
+    def update_video_display(self, img_full, cam_id):
+
+        # project face detail from currently used camera on face screen
+        # if cam_id == self.cam_in_use:
+            # convert full image to qt image
+        qt_img_face = self.convert_cv_qt(img_full, img_full.shape[1], img_full.shape[0])
+        # qt_img_face = self.crop(qt_img_face)
+        qt_img_eye_left = self.crop_eye(qt_img_face, eye='left')
+        qt_img_eye_right = self.crop_eye(qt_img_face, eye='right')
+
+
+
+            # self.label_video_face.setPixmap(qt_img_face)
+            # self.video_monitor_labels[-1].setPixmap(qt_img_face)
+
+        # keys = [k for k, v in self.cam_order.items() if v[0] == cam_id]
+        # name = keys[0]
+        # for cam_number, cam in enumerate(self.cam_order):
+        #     if cam == name:
+        #         break
+        # cam_number = [number for number, cam in enumerate(self.cam_order) if cam == name]
+
+        # direction = self.cam_order[name][1]
+        # write name and number of video stream on image
+        # img_full = self.face_mapping.add_text(img_full, f'{name}: {cam_id}, {direction}')
+        # if camera is currently in use, paint border around image
+        # qt_img_full = self.draw_border_if_necessary(frame=img_full, cam_id=cam_id)
+        # qt_img_full = self.convert_cv_qt(qt_img_face, self.width_video_full, self.height_video_full)
+        # project full video from left camera to screen
+        # self.video_monitor_labels[0].setPixmap(qt_img_face)
+        self.video_monitor_labels[0].setPixmap(qt_img_eye_right)
+        self.video_monitor_labels[1].setPixmap(qt_img_eye_left)
+
+
+
+        # self.video_monitor_labels[cam_number[0]].setPixmap(img_full)
+
+    @staticmethod
+    def convert_cv_qt(rgb_image, desired_width, desired_height):
+        """Convert from an opencv image to QPixmap"""
+        height, width, channels = rgb_image.shape
+        bytes_per_line = channels * width
+        convert_to_Qt_format = QtGui.QImage(rgb_image.data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888)
+        tmp = convert_to_Qt_format.scaled(desired_width, desired_height, QtCore.Qt.KeepAspectRatio,
+                                          mode=QtCore.Qt.SmoothTransformation)
+        return QtGui.QPixmap.fromImage(tmp)
+
+    def crop(self, frame):
+        # calculate a face width as double the distance between both irises
+        face_width = int((self.iris_l[0] - self.iris_r[0]) * 2)
+        # face detail is rectangular, so use same measurement
+        face_height = face_width
+        # leftmost starting point of face rect
+        face_rect_x = int(min(frame.width(), max(0, int(self.face_x - face_width / 2))))
+        # topmost starting point of face rect
+        face_rect_y = int(min(frame.height(), max(0, int(self.face_y - face_height / 2))))
+        # create rectangle around face
+        temp_rect = QtCore.QRect(face_rect_x, face_rect_y, face_width, face_height)
+        # crop new frame from face rect
+        return frame.copy(temp_rect).scaled(self.height_video_full, self.height_video_full,
+                                            mode=QtCore.Qt.SmoothTransformation)
+
+    def crop_eye(self, frame, eye='left'):
+
+        if eye == 'right':
+            center = self.iris_r
+        else:
+            center = self.iris_l
+
+        # calculate eye width as the distance between both irises
+        eye_width = int((self.iris_l[0] - self.iris_r[0])*0.8)
+        # face detail is rectangular, so use same measurement
+        eye_height = eye_width
+        # leftmost starting point of face rect
+        eye_rect_x = int(min(frame.width(), max(0, int(center[0] - eye_width / 2))))
+        # topmost starting point of face rect
+        eye_rect_y = int(min(frame.height(), max(0, int(center[1] - eye_height / 2))))
+        # create rectangle around face
+        temp_rect = QtCore.QRect(eye_rect_x, eye_rect_y, eye_width, eye_height)
+        # crop new frame from face rect
+        return frame.copy(temp_rect).scaled(self.height_video_full, self.height_video_full,
+                                            mode=QtCore.Qt.SmoothTransformation)
+
+    def update_face_coordinates(self):
+        face_x, face_y = self.face_mapping.get_center()
+        iris_l, iris_r, self.is_blink = self.face_mapping.get_iris()
+
+        # if not self.is_blink:
+        self.face_x = self.rec_factor * float(face_x) + (1.0 - self.rec_factor) * self.face_x
+        self.face_y = self.rec_factor * float(face_y) + (1.0 - self.rec_factor) * self.face_y
+        self.iris_l = (self.rec_factor * iris_l[0] + (1.0 - self.rec_factor) * self.iris_l[0],
+                       self.rec_factor * iris_l[1] + (1.0 - self.rec_factor) * self.iris_l[1])
+        self.iris_r = (self.rec_factor * iris_r[0] + (1.0 - self.rec_factor) * self.iris_r[0],
+                       self.rec_factor * iris_r[1] + (1.0 - self.rec_factor) * self.iris_r[1])
+
+    def on_click_clear(self):
+        print('clearing')
+        self.button_clear.setDisabled(True)
+        self.button_save.setDisabled(True)
+        self.button_stop.setDisabled(True)
+        self.button_record.setEnabled(True)
+
+    def on_click_stop(self):
+        print('stopping')
+        self.button_record.setEnabled(True)
+        self.button_clear.setEnabled(True)
+        self.button_save.setEnabled(True)
+        self.button_stop.setDisabled(True)
+
+    def on_click_record(self):
+        print('recording')
+        self.button_record.setDisabled(True)
+        self.button_stop.setEnabled(True)
+        self.button_clear.setDisabled(True)
+        self.button_save.setDisabled(True)
+
+        new_folder_name = uuid.uuid4()
+        print(new_folder_name)
+
+
+    def on_click_save(self):
+        print('saving')
+        self.button_clear.setDisabled(True)
+        self.button_save.setDisabled(True)
+        self.button_stop.setDisabled(True)
+        self.button_record.setEnabled(True)
+
+    def save_data_to_file(self, data):
+        self.data
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)

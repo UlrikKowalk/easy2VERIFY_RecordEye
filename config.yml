@@ -1,9 +1,9 @@
 
 parameters_general:
-  cameras: [['right', 1, 50]]
+  cameras: [['right', 0, 50]]
   camera_start_id: 0
-  video_width: 320
-  video_height: 320
+  video_width: 240
+  video_height: 240
 
 
 
