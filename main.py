@@ -1,3 +1,5 @@
+import os
+
 import cv2
 from PySide6 import QtCore
 from PySide6 import QtWidgets
@@ -141,6 +143,8 @@ class App(QtWidgets.QMainWindow):
         self.iris_r = [0, 0]
         self.rec_factor = 0.95  # used to smoothen data
 
+        self.frame_idx = 0
+
         self.cam_order = {}
         for cam in parameters_general['cameras']:
             #              name,      id,     orientation
@@ -149,6 +153,15 @@ class App(QtWidgets.QMainWindow):
         self.cam_in_use = 0
         self.is_first = True
         self.is_blink = False
+        self.is_recording = False
+
+        self.video_writer = None
+
+        self.new_user_directory_name = ''
+        self.name_directory_data = './data'
+        if not os.path.exists(self.name_directory_data):
+            os.makedirs(self.name_directory_data)
+            print(f'New directory created: {self.name_directory_data}')
 
         # build main app layout
         layout_main = QtWidgets.QVBoxLayout()
@@ -268,6 +281,7 @@ class App(QtWidgets.QMainWindow):
             # except:
             #     self.is_error = True
 
+
         # draw camera frame onto correct video monitor
         self.update_video_display(cv_img, cam_id)
 
@@ -276,6 +290,23 @@ class App(QtWidgets.QMainWindow):
             if self.use_head_tracker:
                 self.headtracker_thread.reset_values()
 
+    def save_image(self, img_l, img_r):
+        # concatenate both eyes horizontally
+        img_concat = cv2.hconcat([img_r, img_l])
+        # transfer to grayscale
+        img_grayscale = cv2.cvtColor(img_concat, cv2.COLOR_BGR2GRAY)
+        # factor by which to rescale
+        scaling_factor = 200.0/img_grayscale.shape[1]
+        # save under this name
+        filename = (f'{self.name_directory_data}/{self.new_user_directory_name}/'
+                      f'{self.new_user_directory_name}_{self.frame_idx}.png')
+        # save image
+        cv2.imwrite(filename,
+                    cv2.resize(img_grayscale, None, fx=scaling_factor, fy=scaling_factor, interpolation=cv2.INTER_AREA))
+        # increase frame counter by 1
+        self.frame_idx += 1
+
+
     def update_video_display(self, img_full, cam_id):
 
         # project face detail from currently used camera on face screen
@@ -283,10 +314,16 @@ class App(QtWidgets.QMainWindow):
             # convert full image to qt image
         qt_img_face = self.convert_cv_qt(img_full, img_full.shape[1], img_full.shape[0])
         # qt_img_face = self.crop(qt_img_face)
-        qt_img_eye_left = self.crop_eye(qt_img_face, eye='left')
-        qt_img_eye_right = self.crop_eye(qt_img_face, eye='right')
+        qt_img_eye_left, rect_l = self.crop_eye(qt_img_face, eye='left')
+        qt_img_eye_right, rect_r = self.crop_eye(qt_img_face, eye='right')
 
-
+        # save images of left and right eye to file in user data directory
+        if self.is_recording:
+            rect_l = rect_l.getRect()
+            rect_r = rect_r.getRect()
+            self.save_image(img_full[rect_l[1]:rect_l[1]+rect_l[3], rect_l[0]:rect_l[0]+rect_l[2], :],
+                            img_full[rect_r[1]:rect_r[1]+rect_r[3], rect_r[0]:rect_r[0]+rect_r[2], :])
+            # self.save_image_qt(qt_img_eye_left, qt_img_eye_right)
 
             # self.label_video_face.setPixmap(qt_img_face)
             # self.video_monitor_labels[-1].setPixmap(qt_img_face)
@@ -304,8 +341,7 @@ class App(QtWidgets.QMainWindow):
         # if camera is currently in use, paint border around image
         # qt_img_full = self.draw_border_if_necessary(frame=img_full, cam_id=cam_id)
         # qt_img_full = self.convert_cv_qt(qt_img_face, self.width_video_full, self.height_video_full)
-        # project full video from left camera to screen
-        # self.video_monitor_labels[0].setPixmap(qt_img_face)
+        # project video of left and right eye to screen
         self.video_monitor_labels[0].setPixmap(qt_img_eye_right)
         self.video_monitor_labels[1].setPixmap(qt_img_eye_left)
 
@@ -357,7 +393,7 @@ class App(QtWidgets.QMainWindow):
         temp_rect = QtCore.QRect(eye_rect_x, eye_rect_y, eye_width, eye_height)
         # crop new frame from face rect
         return frame.copy(temp_rect).scaled(self.height_video_full, self.height_video_full,
-                                            mode=QtCore.Qt.SmoothTransformation)
+                                            mode=QtCore.Qt.SmoothTransformation), temp_rect
 
     def update_face_coordinates(self):
         face_x, face_y = self.face_mapping.get_center()
@@ -378,12 +414,18 @@ class App(QtWidgets.QMainWindow):
         self.button_stop.setDisabled(True)
         self.button_record.setEnabled(True)
 
+        self.frame_idx = 0
+        self.is_recording = False
+
     def on_click_stop(self):
         print('stopping')
         self.button_record.setEnabled(True)
         self.button_clear.setEnabled(True)
         self.button_save.setEnabled(True)
         self.button_stop.setDisabled(True)
+
+        self.is_recording = False
+        self.video_writer.release()
 
     def on_click_record(self):
         print('recording')
@@ -392,8 +434,14 @@ class App(QtWidgets.QMainWindow):
         self.button_clear.setDisabled(True)
         self.button_save.setDisabled(True)
 
-        new_folder_name = uuid.uuid4()
-        print(new_folder_name)
+        self.new_user_directory_name = uuid.uuid4()
+        tmp_directory = f'{self.name_directory_data}/{self.new_user_directory_name}'
+        os.makedirs(tmp_directory)
+        print(f'New directory created: {tmp_directory}')
+
+        self.is_recording = True
+
+
 
 
     def on_click_save(self):
@@ -403,8 +451,11 @@ class App(QtWidgets.QMainWindow):
         self.button_stop.setDisabled(True)
         self.button_record.setEnabled(True)
 
+        self.frame_idx = 0
+        self.is_recording = False
+
     def save_data_to_file(self, data):
-        self.data
+        pass
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
