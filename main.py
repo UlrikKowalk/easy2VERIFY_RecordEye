@@ -157,6 +157,18 @@ class App(QtWidgets.QMainWindow):
 
         self.video_writer = None
 
+        # stores the individual graphic file names in list
+        self.list_filename = []
+        # stores the individual targets in list
+        self.list_target = []
+        # stores both filenames and targets as pandas dataframe
+        self.dataframe = pd.DataFrame({
+            'filename': self.list_filename,
+            'target': self.list_target
+        })
+
+        idx = 0
+
         self.new_user_directory_name = ''
         self.name_directory_data = './data'
         if not os.path.exists(self.name_directory_data):
@@ -271,6 +283,9 @@ class App(QtWidgets.QMainWindow):
 
 
             # self.data_time.append(self.data_time[-1] + duration)
+
+
+            SAVE DATA IN DATAFRAME
 
 
 
