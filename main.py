@@ -157,17 +157,25 @@ class App(QtWidgets.QMainWindow):
 
         self.video_writer = None
 
+        self.head_azimuth_cam = 0
+        self.head_azimuth_cam_absolute = 0
+        self.head_elevation_cam = 0
+
         # stores the individual graphic file names in list
         self.list_filename = []
         # stores the individual targets in list
         self.list_target = []
+        # stores head rotation in list
+        self.list_head_rotation = []
+        # stores head elevation in list
+        self.list_head_elevation = []
         # stores both filenames and targets as pandas dataframe
         self.dataframe = pd.DataFrame({
             'filename': self.list_filename,
-            'target': self.list_target
+            'target': self.list_target,
+            'head_rotation': self.list_head_rotation,
+            'head_elevation': self.list_head_elevation
         })
-
-        idx = 0
 
         self.new_user_directory_name = ''
         self.name_directory_data = './data'
@@ -205,12 +213,6 @@ class App(QtWidgets.QMainWindow):
         layout_menu.addWidget(self.button_save)
 
         self.video_monitor_labels = []
-        # create video monitors
-        # for _ in self.cam_order:
-        #     tmp = QtWidgets.QLabel(self)
-        #     tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
-        #     self.video_monitor_labels.append(tmp)
-        #     layout_video.addWidget(tmp)
 
         # left eye
         tmp = QtWidgets.QLabel(self)
@@ -268,7 +270,7 @@ class App(QtWidgets.QMainWindow):
                 # self.eye_azimuth_cam_absolute = self.eye_azimuth_cam
             try:
                 self.face_mapping.calculate_face_orientation(cv_img)
-                # self.head_azimuth_cam, self.head_elevation_cam = self.face_mapping.get_azimuth_and_elevation()
+                self.head_azimuth_cam, self.head_elevation_cam = self.face_mapping.get_azimuth_and_elevation()
                 # self.eye_azimuth_cam, self.eye_elevation_cam, self.is_blink = self.face_mapping.get_gaze()
 
                 # self.calibrate_estimates()
@@ -281,12 +283,39 @@ class App(QtWidgets.QMainWindow):
             except:
                 self.is_error = True
 
+            # convert full image to qt image
+            qt_img_face = self.convert_cv_qt(cv_img, cv_img.shape[1], cv_img.shape[0])
+            # qt_img_face = self.crop(qt_img_face)
+            qt_img_eye_left, rect_left = self.crop_eye(qt_img_face, eye='left')
+            qt_img_eye_right, rect_right = self.crop_eye(qt_img_face, eye='right')
 
-            # self.data_time.append(self.data_time[-1] + duration)
+            # save images of left and right eye to file in user data directory
+            if self.is_recording:
+                # top, left, height, width
+                left_top, left_left, left_height, left_width = rect_left.getRect()
+                right_top, right_left, right_height, right_width = rect_right.getRect()
 
+                filename = self.save_image(cv_img[left_left:left_left + left_height, left_top:left_top + left_width, :],
+                                           cv_img[right_left:right_left + right_height, right_top:right_top + right_width, :])
 
-            SAVE DATA IN DATAFRAME
+                self.list_filename.append(filename)
+                self.list_target.append(self.head_azimuth_cam_absolute)
+                self.list_head_rotation.append(self.head_azimuth_cam)
+                self.list_head_elevation.append(self.head_elevation_cam)
 
+                if self.frame_idx % 100 == 0:
+                    # write metadata to table
+                    new_dataframe = pd.DataFrame({
+                        'filename': self.list_filename,
+                        'target': self.list_target,
+                        'head_rotation': self.list_head_rotation,
+                        'head_evelation': self.list_head_elevation
+                    })
+                    self.dataframe = self.dataframe._append(new_dataframe, ignore_index=True)
+                    self.list_filename = []
+                    self.list_target = []
+                    self.list_head_rotation = []
+                    self.list_head_elevation = []
 
 
             # try:
@@ -297,8 +326,8 @@ class App(QtWidgets.QMainWindow):
             #     self.is_error = True
 
 
-        # draw camera frame onto correct video monitor
-        self.update_video_display(cv_img, cam_id)
+            # draw camera frame onto correct video monitor
+            self.update_video_display(qt_img_eye_left, qt_img_eye_right)
 
         if self.cam_in_use == cam_id and self.is_first:
             self.is_first = False
@@ -320,49 +349,13 @@ class App(QtWidgets.QMainWindow):
                     cv2.resize(img_grayscale, None, fx=scaling_factor, fy=scaling_factor, interpolation=cv2.INTER_AREA))
         # increase frame counter by 1
         self.frame_idx += 1
+        return f'{self.new_user_directory_name}_{self.frame_idx}.png'
 
 
-    def update_video_display(self, img_full, cam_id):
-
-        # project face detail from currently used camera on face screen
-        # if cam_id == self.cam_in_use:
-            # convert full image to qt image
-        qt_img_face = self.convert_cv_qt(img_full, img_full.shape[1], img_full.shape[0])
-        # qt_img_face = self.crop(qt_img_face)
-        qt_img_eye_left, rect_l = self.crop_eye(qt_img_face, eye='left')
-        qt_img_eye_right, rect_r = self.crop_eye(qt_img_face, eye='right')
-
-        # save images of left and right eye to file in user data directory
-        if self.is_recording:
-            rect_l = rect_l.getRect()
-            rect_r = rect_r.getRect()
-            self.save_image(img_full[rect_l[1]:rect_l[1]+rect_l[3], rect_l[0]:rect_l[0]+rect_l[2], :],
-                            img_full[rect_r[1]:rect_r[1]+rect_r[3], rect_r[0]:rect_r[0]+rect_r[2], :])
-            # self.save_image_qt(qt_img_eye_left, qt_img_eye_right)
-
-            # self.label_video_face.setPixmap(qt_img_face)
-            # self.video_monitor_labels[-1].setPixmap(qt_img_face)
-
-        # keys = [k for k, v in self.cam_order.items() if v[0] == cam_id]
-        # name = keys[0]
-        # for cam_number, cam in enumerate(self.cam_order):
-        #     if cam == name:
-        #         break
-        # cam_number = [number for number, cam in enumerate(self.cam_order) if cam == name]
-
-        # direction = self.cam_order[name][1]
-        # write name and number of video stream on image
-        # img_full = self.face_mapping.add_text(img_full, f'{name}: {cam_id}, {direction}')
-        # if camera is currently in use, paint border around image
-        # qt_img_full = self.draw_border_if_necessary(frame=img_full, cam_id=cam_id)
-        # qt_img_full = self.convert_cv_qt(qt_img_face, self.width_video_full, self.height_video_full)
+    def update_video_display(self, qt_img_eye_left, qt_img_eye_right):
         # project video of left and right eye to screen
         self.video_monitor_labels[0].setPixmap(qt_img_eye_right)
         self.video_monitor_labels[1].setPixmap(qt_img_eye_left)
-
-
-
-        # self.video_monitor_labels[cam_number[0]].setPixmap(img_full)
 
     @staticmethod
     def convert_cv_qt(rgb_image, desired_width, desired_height):
@@ -424,30 +417,36 @@ class App(QtWidgets.QMainWindow):
 
     def on_click_clear(self):
         print('clearing')
-        self.button_clear.setDisabled(True)
-        self.button_save.setDisabled(True)
-        self.button_stop.setDisabled(True)
+        self.button_clear.setEnabled(False)
+        self.button_save.setEnabled(False)
+        self.button_stop.setEnabled(False)
         self.button_record.setEnabled(True)
 
         self.frame_idx = 0
         self.is_recording = False
+        self.list_filename = []
+        self.list_target = []
+        self.dataframe = pd.DataFrame({
+            'filename': self.list_filename,
+            'target': self.list_target
+        })
 
     def on_click_stop(self):
         print('stopping')
         self.button_record.setEnabled(True)
         self.button_clear.setEnabled(True)
         self.button_save.setEnabled(True)
-        self.button_stop.setDisabled(True)
+        self.button_stop.setEnabled(False)
 
         self.is_recording = False
-        self.video_writer.release()
+        # self.video_writer.release()
 
     def on_click_record(self):
         print('recording')
-        self.button_record.setDisabled(True)
+        self.button_record.setEnabled(False)
         self.button_stop.setEnabled(True)
-        self.button_clear.setDisabled(True)
-        self.button_save.setDisabled(True)
+        self.button_clear.setEnabled(False)
+        self.button_save.setEnabled(False)
 
         self.new_user_directory_name = uuid.uuid4()
         tmp_directory = f'{self.name_directory_data}/{self.new_user_directory_name}'
@@ -455,19 +454,24 @@ class App(QtWidgets.QMainWindow):
         print(f'New directory created: {tmp_directory}')
 
         self.is_recording = True
-
-
-
+        self.dataframe = pd.DataFrame({
+            'filename': self.list_filename,
+            'target': self.list_target
+        })
 
     def on_click_save(self):
         print('saving')
-        self.button_clear.setDisabled(True)
-        self.button_save.setDisabled(True)
-        self.button_stop.setDisabled(True)
+        self.button_clear.setEnabled(False)
+        self.button_save.setEnabled(False)
+        self.button_stop.setEnabled(False)
         self.button_record.setEnabled(True)
 
         self.frame_idx = 0
         self.is_recording = False
+        tmp_directory = f'{self.name_directory_data}/{self.new_user_directory_name}'
+        self.dataframe.to_csv(
+            path_or_buf=f"{tmp_directory}/dataset.csv",
+            index=False)
 
     def save_data_to_file(self, data):
         pass
