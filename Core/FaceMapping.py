@@ -30,6 +30,7 @@ class FaceMapping:
         self.gaze_y = None
         self.azimuth = 0
         self.elevation = 0
+        self.tilt = 0
         self.is_blink = False
         self.eye_boundaries_left = None
         self.eye_boundaries_right = None
@@ -135,7 +136,7 @@ class FaceMapping:
     def get_gaze(self):
         return -self.gaze_x, self.gaze_y, self.is_blink
 
-    def get_azimuth_and_elevation(self):
+    def get_position_data(self):
 
         face_3d = []
         face_2d = []
@@ -171,4 +172,5 @@ class FaceMapping:
                 # Get the y rotation degree
                 self.elevation = angles[0] * 360
                 self.azimuth = angles[1] * 360
-                return self.azimuth, self.elevation
+                self.tilt = angles[2] * 360
+                return self.azimuth, self.elevation, self.tilt
