@@ -1,5 +1,5 @@
 import os
-
+import random
 import cv2
 from PySide6 import QtCore
 from PySide6 import QtWidgets
@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 import json
 import uuid
+import serial
+import serial.tools.list_ports
 
 from Core.VideoSourceMulti import VideoSourceMulti
 from Core.HeadTracker import HeadTracker
@@ -23,7 +25,7 @@ with open('config.yml') as config:
 
 
 class VideoInputThread(QtCore.QThread):
-    new_frame_obtained = QtCore.Signal(np.ndarray, int)
+    new_frame_obtained = QtCore.Signal(np.ndarray, int, float)
     no_camera_signal = QtCore.Signal()
     invalid_file_signal = QtCore.Signal()
     fps_detected = QtCore.Signal(int)
@@ -85,7 +87,7 @@ class VideoInputThread(QtCore.QThread):
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                 if ret:
-                    self.new_frame_obtained.emit(frame, self.cam_id)
+                    self.new_frame_obtained.emit(frame, self.cam_id, self.fps)
                 else:
                     self.is_running = False
                     self.video_file_ended.emit()
@@ -125,6 +127,55 @@ class HeadTrackerThread(QtCore.QThread):
     def stop(self):
         self.is_running = False
 
+class ArduinoThread(QtCore.QThread):
+    arduino_connect = QtCore.Signal()
+    arduino_disconnect = QtCore.Signal()
+
+    def __init__(self, num_leds):
+        super().__init__()
+        self.wait_interval = 0.02
+        self.arduino = serial.Serial(port='COM3', baudrate=9600, timeout=.1)
+        self.is_running = True
+        self.num_leds = num_leds
+        self.led_pos = int(self.num_leds/2-1)
+        self.is_ready = False
+        time.sleep(2)
+
+    def run(self):
+        print('Starting Arduino thread.')
+
+        while self.is_running:
+
+            if self.is_ready and not os.path.exists("COM3"):
+                self.arduino_disconnect.emit()
+                self.is_ready = False
+            elif not self.is_ready and os.path.exists("COM3"):
+                if self.arduino.readline().decode().strip() == "READY":
+                    self.arduino_connect.emit()
+                    self.is_ready = True
+
+            self.arduino.write(f'{self.led_pos}.\n'.encode('utf-8'))
+            time.sleep(self.wait_interval)
+
+
+        print('Arduino thread stopped.')
+
+    def set_data(self, led_pos):
+        self.led_pos = int(led_pos)
+        print(f'received new led: {self.led_pos}')
+
+    def stop(self):
+        self.is_running = False
+        self.arduino.write(f'{-255}.\n'.encode('utf-8'))
+        time.sleep(1)
+        self.arduino.close()
+
+    def clear_leds(self):
+        self.led_pos = -255
+
+    def get_ready(self):
+        return self.is_ready
+
 class App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -150,15 +201,27 @@ class App(QtWidgets.QMainWindow):
 
         self.cam_in_use = 0
         self.is_first = True
+        self.is_cam_running = False
+        self.is_arduino_ready = False
         self.is_blink = False
         self.is_recording = False
 
-        self.video_writer = None
+        # self.video_writer = None
 
         self.head_azimuth_cam = 0
         self.head_azimuth_cam_absolute = 0
         self.head_elevation_cam = 0
         self.head_tilt_cam = 0
+
+        self.num_leds = 30
+        self.min_angle = -45
+        self.max_angle = 45
+        self.freq1 = 0.25
+        self.amp1 = 1
+        self.phase1 = 2 * np.pi * random.random()
+        self.freq2 = 0.0875
+        self.amp2 = 1
+        self.phase2 = 2 * np.pi * random.random()
 
         # stores the individual graphic file names in list
         self.list_filename = []
@@ -170,14 +233,6 @@ class App(QtWidgets.QMainWindow):
         self.list_head_elevation = []
         # stores head tilt in list
         self.list_head_tilt = []
-        # stores both filenames and targets as pandas dataframe
-        # self.dataframe = pd.DataFrame({
-        #     'filename': self.list_filename,
-        #     'target': self.list_target,
-        #     'head_rotation': self.list_head_rotation,
-        #     'head_elevation': self.list_head_elevation
-        # })
-        # self.datalist = []
 
         self.new_user_directory_name = ''
         self.name_directory_data = './data'
@@ -197,21 +252,13 @@ class App(QtWidgets.QMainWindow):
         self.setCentralWidget(window_content)
 
         self.button_save = QtWidgets.QPushButton('Save')
-        self.button_save.setDisabled(True)
+        self.button_save.setEnabled(False)
         self.button_save.clicked.connect(self.on_click_save)
-        # self.button_stop = QtWidgets.QPushButton('Stop')
-        # self.button_stop.setDisabled(True)
-        # self.button_stop.clicked.connect(self.on_click_stop)
-        # self.button_clear = QtWidgets.QPushButton('Clear')
-        # self.button_clear.setDisabled(True)
-        # self.button_clear.clicked.connect(self.on_click_clear)
         self.button_record = QtWidgets.QPushButton('Record')
-        self.button_record.setDisabled(False)
+        self.button_record.setEnabled(False)
         self.button_record.clicked.connect(self.on_click_record)
 
         layout_menu.addWidget(self.button_record)
-        # layout_menu.addWidget(self.button_stop)
-        # layout_menu.addWidget(self.button_clear)
         layout_menu.addWidget(self.button_save)
 
         self.video_monitor_labels = []
@@ -226,6 +273,15 @@ class App(QtWidgets.QMainWindow):
         tmp.resize(parameters_general["video_width"], parameters_general["video_height"])
         self.video_monitor_labels.append(tmp)
         layout_video.addWidget(tmp)
+
+        # create Aruidno thread for led display
+        try:
+            self.arduino_thread = ArduinoThread(self.num_leds)
+            self.arduino_thread.arduino_connect.connect(self.arduino_connect)
+            self.arduino_thread.arduino_disconnect.connect(self.arduino_disconnect)
+            self.arduino_thread.start()
+        except:
+            print('No Arduino device found.')
 
         # create a separate video thread for each camera
         self.video_threads = []
@@ -244,6 +300,7 @@ class App(QtWidgets.QMainWindow):
             print('No dedicated head tracking device found.')
 
     def __del__(self):
+        self.arduino_thread.stop()
         for video_thread in self.video_threads:
             video_thread.new_frame_obtained.disconnect()
             video_thread.no_camera_signal.disconnect()
@@ -255,9 +312,32 @@ class App(QtWidgets.QMainWindow):
         if self.use_head_tracker:
             self.headtracker_thread.stop()
 
+    @QtCore.Slot()
+    def arduino_connect(self):
+        print('Arduino connected.')
+        self.is_arduino_ready = True
+        self.check_all_systems()
 
-    @QtCore.Slot(np.ndarray, int)
-    def new_frame_available(self, cv_img, cam_id):
+    @QtCore.Slot()
+    def arduino_disconnect(self):
+        print('Arduino was disconnected.')
+        self.is_arduino_ready = False
+        self.check_all_systems()
+
+    def check_all_systems(self):
+        if self.is_arduino_ready and self.is_cam_running:
+            self.button_record.setEnabled(True)
+        else:
+            self.button_record.setEnabled(False)
+            self.is_recording = False
+
+    @QtCore.Slot(np.ndarray, int, float)
+    def new_frame_available(self, cv_img, cam_id, fps):
+
+        if self.is_cam_running == False:
+            self.is_cam_running = True
+            self.check_all_systems()
+
         # if frame originates from currently used camera, perform face calculations
         if self.cam_in_use == cam_id:
             if self.is_first:
@@ -291,7 +371,7 @@ class App(QtWidgets.QMainWindow):
             qt_img_eye_right, rect_right = self.crop_eye(qt_img_face, eye='right')
 
             # save images of left and right eye to file in user data directory
-            if self.is_recording and not self.is_blink:
+            if self.is_recording and not self.is_blink and self.arduino_thread.get_ready():
                 # top, left, height, width
                 left_top, left_left, left_height, left_width = rect_left.getRect()
                 right_top, right_left, right_height, right_width = rect_right.getRect()
@@ -300,29 +380,16 @@ class App(QtWidgets.QMainWindow):
                                            cv_img[right_left:right_left + right_height, right_top:right_top + right_width, :])
 
                 self.list_filename.append(filename)
-                self.list_target.append(self.head_azimuth_cam_absolute)
                 self.list_head_rotation.append(self.head_azimuth_cam)
                 self.list_head_elevation.append(self.head_elevation_cam)
                 self.list_head_tilt.append(self.head_tilt_cam)
 
+                led_pos, target = self.get_led_pos_and_target(fps)
+                self.arduino_thread.set_data(led_pos=led_pos)
+                self.list_target.append(target)
+
                 # increase frame counter by 1
                 self.frame_idx += 1
-
-                # if self.frame_idx % 100 == 0:
-                #     # write metadata to table
-                #     new_dataframe = {
-                #         'filename': self.list_filename,
-                #         'target': self.list_target,
-                #         'head_rotation': self.list_head_rotation,
-                #         'head_evelation': self.list_head_elevation
-                #     }
-                #     # self.dataframe = self.dataframe._append(new_dataframe, ignore_index=True)
-                #     self.datalist.append(new_dataframe)
-                #     self.list_filename = []
-                #     self.list_target = []
-                #     self.list_head_rotation = []
-                #     self.list_head_elevation = []
-
 
             # try:
             #     # self.update_data()
@@ -339,6 +406,16 @@ class App(QtWidgets.QMainWindow):
             self.is_first = False
             if self.use_head_tracker:
                 self.headtracker_thread.reset_values()
+
+    def get_led_pos_and_target(self, fps):
+        float_sample = (self.amp1 * np.sin(2 * np.pi * self.freq1 * self.frame_idx / fps + self.phase1) +
+                        self.amp2 * np.sin(2 * np.pi * self.freq2 * self.frame_idx / fps + self.phase2))
+        # normalized to [0,1]
+        float_sample = 0.5 * (float_sample / (self.amp1 + self.amp2) + 1.0)
+        float_target = (float_sample * (self.max_angle - self.min_angle) + self.min_angle) / 180 * np.pi
+        float_pos = float_sample * self.num_leds
+        int_pos = np.round(float_pos)
+        return int_pos, float_target
 
     def save_image(self, img_l, img_r):
         # concatenate both eyes horizontally
@@ -419,34 +496,8 @@ class App(QtWidgets.QMainWindow):
         self.iris_r = (self.rec_factor * iris_r[0] + (1.0 - self.rec_factor) * self.iris_r[0],
                        self.rec_factor * iris_r[1] + (1.0 - self.rec_factor) * self.iris_r[1])
 
-    # def on_click_clear(self):
-    #     print('clearing')
-    #     self.button_clear.setEnabled(False)
-    #     self.button_save.setEnabled(False)
-    #     self.button_stop.setEnabled(False)
-    #     self.button_record.setEnabled(True)
-    #
-    #     self.frame_idx = 0
-    #     self.is_recording = False
-    #     self.list_filename = []
-    #     self.list_target = []
-    #     self.dataframe = pd.DataFrame({
-    #         'filename': self.list_filename,
-    #         'target': self.list_target
-    #     })
-    #
-    # def on_click_stop(self):
-    #     print('stopping')
-    #     self.button_record.setEnabled(True)
-    #     self.button_clear.setEnabled(True)
-    #     self.button_save.setEnabled(True)
-    #     self.button_stop.setEnabled(False)
-    #
-    #     self.is_recording = False
-    #     # self.video_writer.release()
-
     def on_click_record(self):
-        print('recording')
+        print('Recording started.')
         self.button_record.setEnabled(False)
         self.button_save.setEnabled(True)
 
@@ -456,21 +507,17 @@ class App(QtWidgets.QMainWindow):
         print(f'New directory created: {tmp_directory}')
 
         self.is_recording = True
-        self.setStyleSheet("background-color: red;")
-        # self.dataframe = pd.DataFrame({
-        #     'filename': self.list_filename,
-        #     'target': self.list_target
-        # })
+        self.setStyleSheet("background-color: #ff6666;")
 
     def on_click_save(self):
-        print('saving')
+        self.arduino_thread.clear_leds()
         self.button_save.setEnabled(False)
-        self.button_record.setEnabled(True)
+        self.check_all_systems()
 
-        self.frame_idx = 0
         self.is_recording = False
         self.setStyleSheet("background-color: white;")
         tmp_directory = f'{self.name_directory_data}/{self.new_user_directory_name}'
+
         tmp_dataframe = pd.DataFrame({
             'filename':         self.list_filename,
             'target':           self.list_target,
@@ -481,6 +528,8 @@ class App(QtWidgets.QMainWindow):
         tmp_dataframe.to_csv(
             path_or_buf=f"{tmp_directory}/dataset.csv",
             index=False)
+        print(f'{self.frame_idx} frames successfully stored.')
+        self.frame_idx = 0
 
     def save_data_to_file(self, data):
         pass
