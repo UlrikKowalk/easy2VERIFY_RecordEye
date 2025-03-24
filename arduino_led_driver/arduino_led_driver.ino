@@ -1,9 +1,10 @@
 #include <FastLED.h>
 
 #define PIN 4             // Der Pin, an dem der WS2812B-LED-Strip angeschlossen ist
-#define NUM_LEDS 30       // Anzahl der LEDs im Strip
+#define NUM_LEDS 237       // Anzahl der LEDs im Strip
 #define LED_TYPE WS2812B  // LED-Typ (WS2812B)
 #define COLOR_ORDER GRB   // Farbformat (GRB ist Standard für WS2812B)
+#define LED_CENTER 119
 
 CRGB leds[NUM_LEDS];      // Array für die LEDs
 
@@ -15,7 +16,7 @@ void setup() {
   FastLED.clear();      // Alle LEDs zu Beginn ausschalten
   //FastLED.setBrightness(50);
   //FastLED.show();       // LEDs sofort aktualisieren
-  //start_show();
+  start_show();
   FastLED.setBrightness(20);
   //FastLED.clear();
   FastLED.show();
@@ -55,28 +56,24 @@ void loop() {
 }
 
 void start_show() {
-  int center = int(NUM_LEDS/2);
-  int led1 = center;
-  int led2 = center;
-  for (int i=0; i<center; i++){
-    leds[led1-2] = CRGB::Black;
-    leds[led2] = CRGB::Black;
-    leds[led1-1] = CRGB::Red;
-    leds[led2-1] = CRGB::Red;
-    led1++;
-    led2--;
-    FastLED.show();
-    delay(20);
-  }
-  for (int i=center; i>0; i--){
-    leds[led1] = CRGB::Black;
-    leds[led2-2] = CRGB::Black;
-    leds[NUM_LEDS - led1-1] = CRGB::Red;
-    leds[NUM_LEDS - led2-1] = CRGB::Red;
-    led1--;
-    led2++;
-    FastLED.show();
-    delay(20);
-  }
 
+  for (int i=0; i<LED_CENTER; i++){
+    leds[LED_CENTER - i + 1 - 1] = CRGB::Black;
+    leds[LED_CENTER + i - 1 - 1] = CRGB::Black;
+    leds[LED_CENTER - i -1] = CRGB::Red;
+    leds[LED_CENTER + i -1] = CRGB::Red;
+
+    FastLED.show();
+    delay(5);
+  }
+  for (int i=0; i<LED_CENTER; i++){
+    leds[i-1] = CRGB::Black;
+    leds[NUM_LEDS - i + 1] = CRGB::Black;
+    leds[i] = CRGB::Red;
+    leds[NUM_LEDS - i] = CRGB::Red;
+    FastLED.show();
+    delay(5);
+  }
+  leds[LED_CENTER] = CRGB::Black;
+  FastLED.show();
 }

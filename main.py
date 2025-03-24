@@ -92,7 +92,7 @@ class VideoInputThread(QtCore.QThread):
                     self.is_running = False
                     self.video_file_ended.emit()
                 time.sleep((1.0 / self.fps) - ((time.time() - start_time) % (1.0 / self.fps)))
-            print('Stopped.')
+            print('Video thread stopped.')
 
 class HeadTrackerThread(QtCore.QThread):
     # headtrack_data_available_signal = QtCore.Signal(np.ndarray)
@@ -131,13 +131,14 @@ class ArduinoThread(QtCore.QThread):
     arduino_connect = QtCore.Signal()
     arduino_disconnect = QtCore.Signal()
 
-    def __init__(self, num_leds):
+    def __init__(self, num_leds, port='COM3'):
         super().__init__()
         self.wait_interval = 0.02
-        self.arduino = serial.Serial(port='COM3', baudrate=9600, timeout=.1)
+        self.port = port
+        self.arduino = serial.Serial(port=self.port, baudrate=9600, timeout=.1)
         self.is_running = True
         self.num_leds = num_leds
-        self.led_pos = int(self.num_leds/2-1)
+        self.led_pos = int((self.num_leds+1)/2)
         self.is_ready = False
         time.sleep(2)
 
@@ -146,10 +147,10 @@ class ArduinoThread(QtCore.QThread):
 
         while self.is_running:
 
-            if self.is_ready and not os.path.exists("COM3"):
+            if self.is_ready and not os.path.exists(self.port):
                 self.arduino_disconnect.emit()
                 self.is_ready = False
-            elif not self.is_ready and os.path.exists("COM3"):
+            elif not self.is_ready and os.path.exists(self.port):
                 if self.arduino.readline().decode().strip() == "READY":
                     self.arduino_connect.emit()
                     self.is_ready = True
@@ -162,7 +163,7 @@ class ArduinoThread(QtCore.QThread):
 
     def set_data(self, led_pos):
         self.led_pos = int(led_pos)
-        print(f'received new led: {self.led_pos}')
+        # print(f'received new led: {self.led_pos}')
 
     def stop(self):
         self.is_running = False
@@ -213,13 +214,14 @@ class App(QtWidgets.QMainWindow):
         self.head_elevation_cam = 0
         self.head_tilt_cam = 0
 
-        self.num_leds = 30
+        self.num_leds = 237
+        tmp_scaling_factor = 60 / self.num_leds
         self.min_angle = -45
         self.max_angle = 45
-        self.freq1 = 0.25
+        self.freq1 = 0.25 * tmp_scaling_factor
         self.amp1 = 1
         self.phase1 = 2 * np.pi * random.random()
-        self.freq2 = 0.0875
+        self.freq2 = 0.0875 * tmp_scaling_factor
         self.amp2 = 1
         self.phase2 = 2 * np.pi * random.random()
 
@@ -276,7 +278,7 @@ class App(QtWidgets.QMainWindow):
 
         # create Aruidno thread for led display
         try:
-            self.arduino_thread = ArduinoThread(self.num_leds)
+            self.arduino_thread = ArduinoThread(self.num_leds, port="COM4")
             self.arduino_thread.arduino_connect.connect(self.arduino_connect)
             self.arduino_thread.arduino_disconnect.connect(self.arduino_disconnect)
             self.arduino_thread.start()
@@ -300,17 +302,15 @@ class App(QtWidgets.QMainWindow):
             print('No dedicated head tracking device found.')
 
     def __del__(self):
+        print('Stopping threads.')
         self.arduino_thread.stop()
         for video_thread in self.video_threads:
-            video_thread.new_frame_obtained.disconnect()
-            video_thread.no_camera_signal.disconnect()
-            video_thread.invalid_file_signal.disconnect()
-            video_thread.fps_detected.disconnect()
-            video_thread.video_file_ended.disconnect()
             video_thread.stop()
-            video_thread.quit()
         if self.use_head_tracker:
             self.headtracker_thread.stop()
+
+    def closeEvent(self, event):
+        self.__del__()
 
     @QtCore.Slot()
     def arduino_connect(self):
