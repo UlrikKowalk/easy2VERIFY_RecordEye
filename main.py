@@ -355,6 +355,7 @@ class App(QtWidgets.QMainWindow):
             try:
                 self.face_mapping.calculate_face_orientation(cv_img)
                 self.head_azimuth_cam, self.head_elevation_cam, self.head_roll_cam, self.face_distance = self.face_mapping.get_position_data()
+
                 _, _, self.is_blink = self.face_mapping.get_gaze()
 
                 # self.calibrate_estimates()
@@ -386,8 +387,6 @@ class App(QtWidgets.QMainWindow):
                 self.list_head_elevation.append(self.head_elevation_cam)
                 self.list_head_roll.append(self.head_roll_cam)
                 self.list_face_distance.append(self.face_distance)
-
-
 
                 led_pos, target = self.get_led_pos_and_target(fps)
                 self.arduino_thread.set_data(led_pos=led_pos)
@@ -536,6 +535,11 @@ class App(QtWidgets.QMainWindow):
             index=False)
         print(f'{self.frame_idx} frames successfully stored.')
         self.frame_idx = 0
+        self.list_filename = []
+        self.list_target = []
+        self.list_head_rotation = []
+        self.list_head_elevation = []
+        self.list_head_roll = []
 
     def save_data_to_file(self, data):
         pass
