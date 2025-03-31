@@ -212,7 +212,8 @@ class App(QtWidgets.QMainWindow):
         self.head_azimuth_cam = 0
         self.head_azimuth_cam_absolute = 0
         self.head_elevation_cam = 0
-        self.head_tilt_cam = 0
+        self.head_roll_cam = 0
+        self.face_distance = 0
 
         self.num_leds = 237
         tmp_scaling_factor = 60 / self.num_leds
@@ -233,8 +234,10 @@ class App(QtWidgets.QMainWindow):
         self.list_head_rotation = []
         # stores head elevation in list
         self.list_head_elevation = []
-        # stores head tilt in list
-        self.list_head_tilt = []
+        # stores head roll in list
+        self.list_head_roll = []
+        # stores face distane in list
+        self.list_face_distance = []
 
         self.new_user_directory_name = ''
         self.name_directory_data = './data'
@@ -351,14 +354,13 @@ class App(QtWidgets.QMainWindow):
                 # self.eye_azimuth_cam_absolute = self.eye_azimuth_cam
             try:
                 self.face_mapping.calculate_face_orientation(cv_img)
-                self.head_azimuth_cam, self.head_elevation_cam, self.head_tilt_cam = self.face_mapping.get_position_data()
+                self.head_azimuth_cam, self.head_elevation_cam, self.head_roll_cam, self.face_distance = self.face_mapping.get_position_data()
                 _, _, self.is_blink = self.face_mapping.get_gaze()
 
                 # self.calibrate_estimates()
                 # self.correct_azimuth()
                 # self.determine_cam_in_use()
                 self.update_face_coordinates()
-
 
                 self.is_error = False
             except:
@@ -382,7 +384,10 @@ class App(QtWidgets.QMainWindow):
                 self.list_filename.append(filename)
                 self.list_head_rotation.append(self.head_azimuth_cam)
                 self.list_head_elevation.append(self.head_elevation_cam)
-                self.list_head_tilt.append(self.head_tilt_cam)
+                self.list_head_roll.append(self.head_roll_cam)
+                self.list_face_distance.append(self.face_distance)
+
+
 
                 led_pos, target = self.get_led_pos_and_target(fps)
                 self.arduino_thread.set_data(led_pos=led_pos)
@@ -523,7 +528,8 @@ class App(QtWidgets.QMainWindow):
             'target':           self.list_target,
             'head_rotation':    self.list_head_rotation,
             'head_elevation':   self.list_head_elevation,
-            'head_tilt':        self.list_head_tilt
+            'head_roll':        self.list_head_roll,
+            'face_distance':    self.list_face_distance
         })
         tmp_dataframe.to_csv(
             path_or_buf=f"{tmp_directory}/dataset.csv",

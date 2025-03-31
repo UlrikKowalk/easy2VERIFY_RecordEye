@@ -30,15 +30,18 @@ class FaceMapping:
         self.gaze_y = None
         self.azimuth = 0
         self.elevation = 0
-        self.tilt = 0
+        self.roll = 0
         self.is_blink = False
         self.eye_boundaries_left = None
         self.eye_boundaries_right = None
         # self.userHead = 3400
         # self.distance = 45
+        self.normalizedFocaleX = 1.40625
+        self.norm_iris_distance = 11.7
+        self.iris_distance = 10.0
         self.cameraOffset = 0#10#4.75
         self.camhfov = 40#47.0#50.0 #-> GOPRO/4-3Linear, #70.4 -> Logitech 920,  #47.0 -> MacbookPro # camera horizontal field of view, DEGREES
-        self.camvfov = 40#26.5#38.7 #-> GOPRO/4-3Linear #43.4 -> Logitech 920, #26.5 -> MacbookPro  # camera vertical field
+        self.camvfov = 26#26.5#38.7 #-> GOPRO/4-3Linear #43.4 -> Logitech 920, #26.5 -> MacbookPro  # camera vertical field
         self.face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1,
                                                refine_landmarks=True,
                                                min_detection_confidence=0.5,
@@ -70,6 +73,10 @@ class FaceMapping:
 
             self.center_left = np.array([l_cx, l_cy], dtype=np.int32)
             self.center_right = np.array([r_cx, r_cy], dtype=np.int32)
+            if self.center_right is not None and self.center_left is not None:
+                self.iris_distance = np.sqrt(np.sum((self.center_left - self.center_right)**2))
+                self.roll = np.arctan((self.center_left[1]-self.center_right[1])/(self.center_left[0]-self.center_right[0])) / np.pi * 180
+
 
             # print(np.sum(abs(mesh_points[EYELID_LEFT_TOP] - mesh_points[EYELID_LEFT_BOTTOM]), axis=(0, 1)))
 
@@ -101,7 +108,7 @@ class FaceMapping:
             # left_iris = mesh_points[LEFT_IRIS]
             # right_iris = mesh_points[RIGHT_IRIS]
             # irl = np.mean(left_iris,axis=0)
-            # dist1 = np.sqrt((irl[0]-self.eye_boundaries_left[0,0])**2 + (irl[1]-self.eye_boundaries_left[0,1])**2)
+            # self.iris_distance = np.sqrt((irl[0]-self.eye_boundaries_left[0,0])**2 + (irl[1]-self.eye_boundaries_left[0,1])**2)
 
             if self.eye_boundaries_left.all() and self.eye_boundaries_right.all():
                 # paint white line on eye center
@@ -170,7 +177,10 @@ class FaceMapping:
                 angles, mtxR, mtxQ, Qx, Qy, Qz = cv.RQDecomp3x3(rmat)
 
                 # Get the y rotation degree
-                self.elevation = angles[0] * 360
-                self.azimuth = angles[1] * 360
-                self.tilt = angles[2] * 360
-                return self.azimuth, self.elevation, self.tilt
+                self.elevation = angles[0] * 360 * 2.5
+                self.azimuth = angles[1] * 360 * 2.5
+
+                fx = self.img_w * self.normalizedFocaleX
+                face_distance = (fx * (self.norm_iris_distance / self.iris_distance)) / 1.25
+
+                return self.azimuth, self.elevation, self.roll, face_distance
