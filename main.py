@@ -205,6 +205,7 @@ class App(QtWidgets.QMainWindow):
         self.is_first = True
         self.is_cam_running = False
         self.is_arduino_ready = False
+        self.is_name_not_empty = False
         self.is_blink = False
         self.is_recording = False
 
@@ -258,6 +259,7 @@ class App(QtWidgets.QMainWindow):
         self.setCentralWidget(window_content)
 
         self.textedit_name = QtWidgets.QLineEdit('')
+        self.textedit_name.textEdited.connect(self.name_edited)
         self.subject_name = ''
 
         self.button_save = QtWidgets.QPushButton('Save')
@@ -333,11 +335,19 @@ class App(QtWidgets.QMainWindow):
         self.check_all_systems()
 
     def check_all_systems(self):
-        if self.is_arduino_ready and self.is_cam_running:
+        if self.is_arduino_ready and self.is_cam_running and self.is_name_not_empty:
             self.button_record.setEnabled(True)
         else:
             self.button_record.setEnabled(False)
             self.is_recording = False
+
+    def name_edited(self):
+        self.subject_name = self.textedit_name.text()
+        if not self.subject_name:
+            self.is_name_not_empty = False
+        else:
+            self.is_name_not_empty = True
+        self.check_all_systems()
 
     @QtCore.Slot(np.ndarray, int, float)
     def new_frame_available(self, cv_img, cam_id, fps):
