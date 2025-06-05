@@ -19,7 +19,7 @@ from Core.VideoSourceMulti import VideoSourceMulti
 from Core.HeadTracker import HeadTracker
 from Core.FaceMapping import FaceMapping
 
-with open('config.yml') as config:
+with open('d:/easy2VERIFY_recordEye/config.yml') as config:
     configuration = yaml.safe_load(config)
     parameters_general = configuration['parameters_general']
 
@@ -194,6 +194,7 @@ class App(QtWidgets.QMainWindow):
         self.rec_factor = 0.95  # used to smoothen data
 
         self.frame_idx = 0
+        self.rand_start_idx = 0
 
         self.cam_order = {}
         for cam in parameters_general['cameras']:
@@ -240,7 +241,7 @@ class App(QtWidgets.QMainWindow):
         self.list_face_distance = []
 
         self.new_user_directory_name = ''
-        self.name_directory_data = './data'
+        self.name_directory_data = 'd:/easy2VERIFY_recordEye/data'
         if not os.path.exists(self.name_directory_data):
             os.makedirs(self.name_directory_data)
             print(f'New directory created: {self.name_directory_data}')
@@ -256,6 +257,9 @@ class App(QtWidgets.QMainWindow):
         window_content.setLayout(layout_main)
         self.setCentralWidget(window_content)
 
+        self.textedit_name = QtWidgets.QLineEdit('')
+        self.subject_name = ''
+
         self.button_save = QtWidgets.QPushButton('Save')
         self.button_save.setEnabled(False)
         self.button_save.clicked.connect(self.on_click_save)
@@ -263,6 +267,7 @@ class App(QtWidgets.QMainWindow):
         self.button_record.setEnabled(False)
         self.button_record.clicked.connect(self.on_click_record)
 
+        layout_menu.addWidget(self.textedit_name)
         layout_menu.addWidget(self.button_record)
         layout_menu.addWidget(self.button_save)
 
@@ -281,7 +286,7 @@ class App(QtWidgets.QMainWindow):
 
         # create Aruidno thread for led display
         try:
-            self.arduino_thread = ArduinoThread(self.num_leds, port="COM4")
+            self.arduino_thread = ArduinoThread(self.num_leds, port="COM5")
             self.arduino_thread.arduino_connect.connect(self.arduino_connect)
             self.arduino_thread.arduino_disconnect.connect(self.arduino_disconnect)
             self.arduino_thread.start()
@@ -412,8 +417,8 @@ class App(QtWidgets.QMainWindow):
                 self.headtracker_thread.reset_values()
 
     def get_led_pos_and_target(self, fps):
-        float_sample = (self.amp1 * np.sin(2 * np.pi * self.freq1 * self.frame_idx / fps + self.phase1) +
-                        self.amp2 * np.sin(2 * np.pi * self.freq2 * self.frame_idx / fps + self.phase2))
+        float_sample = (self.amp1 * np.sin(2 * np.pi * self.freq1 * (self.frame_idx + self.rand_start_idx) / fps + self.phase1) +
+                        self.amp2 * np.sin(2 * np.pi * self.freq2 * (self.frame_idx + self.rand_start_idx) / fps + self.phase2))
         # normalized to [0,1]
         float_sample = 0.5 * (float_sample / (self.amp1 + self.amp2) + 1.0)
         float_target = (float_sample * (self.max_angle - self.min_angle) + self.min_angle) / 180 * np.pi
@@ -502,10 +507,16 @@ class App(QtWidgets.QMainWindow):
 
     def on_click_record(self):
         print('Recording started.')
+        self.textedit_name.setEnabled(False)
+        self.subject_name = self.textedit_name.text()
         self.button_record.setEnabled(False)
         self.button_save.setEnabled(True)
 
-        self.new_user_directory_name = uuid.uuid4()
+        self.rand_start_idx = random.randint(a=0, b=1000)
+        self.phase1 = 2 * np.pi * random.random()
+        self.phase2 = 2 * np.pi * random.random()
+
+        self.new_user_directory_name = f'{self.subject_name}_{uuid.uuid4()}'
         tmp_directory = f'{self.name_directory_data}/{self.new_user_directory_name}'
         os.makedirs(tmp_directory)
         print(f'New directory created: {tmp_directory}')
@@ -516,6 +527,7 @@ class App(QtWidgets.QMainWindow):
     def on_click_save(self):
         self.arduino_thread.clear_leds()
         self.button_save.setEnabled(False)
+        self.textedit_name.setEnabled(True)
         self.check_all_systems()
 
         self.is_recording = False
@@ -540,9 +552,8 @@ class App(QtWidgets.QMainWindow):
         self.list_head_rotation = []
         self.list_head_elevation = []
         self.list_head_roll = []
+        self.list_face_distance = []
 
-    def save_data_to_file(self, data):
-        pass
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
